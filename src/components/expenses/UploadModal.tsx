@@ -9,28 +9,6 @@ import type { Project, AIExtracted } from '@/types'
 import { CATEGORIES, CURRENCIES, COUNTRIES } from '@/components/shared/constants'
 import { cn } from '@/lib/utils'
 
-const RECEIPT_PROMPT = `You are a specialist in extracting structured data from receipts and invoices for a business expense app. The receipt may be in any language. The user is based in Spain/Europe.
-
-EXTRACTION RULES:
-- date: Look for any date on the receipt. Common formats: DD/MM/YYYY, DD-MM-YY, YYYY-MM-DD, "3 Mar 2025".
-  Always return ISO format YYYY-MM-DD. If format is ambiguous (e.g. 03/04/25), assume DD/MM/YY (European convention).
-  Return null if truly not found.
-- total_amount: The FINAL amount paid. Look for keywords: Total, TOTAL, Importe, A pagar, Amount due, Grand Total, Gesamtbetrag, Montant TTC.
-  Return as string number (e.g. "45.30"). Return null if not found. NEVER infer or calculate.
-- tax_amount: The VAT/IVA/tax portion only. Look for: IVA, VAT, TVA, MwSt, GST, Tax.
-  Return null if not explicitly printed — do not calculate from total minus net.
-- net_amount: The base amount before tax. Look for: Base imponible, Subtotal, Net, HT, Netto.
-  Return null if not explicitly printed — do not calculate.
-- supplier: The business name at the top of the receipt, or the brand/store name. Return null if not found.
-- tax_id: The supplier's tax registration number. Look for: NIF, CIF, VAT No, TVA, SIRET, Steuernummer. Return null if not found.
-- currency: ISO 4217 code. Infer from symbol (€=EUR, $=USD, £=GBP, $=COP if Colombian context) or country. Default EUR if European receipt with no symbol.
-- country: Country in Spanish where the expense occurred. Infer from: language of receipt, address, currency, tax ID format (Spanish NIF=España, French SIRET=Francia, etc). Return null if cannot determine.
-- category: One of exactly: "transporte", "alojamiento", "comidas", "gasolina", "otros".
-  Infer from supplier name and context. Hotels/hostels=alojamiento, restaurants/cafes/bars=comidas, airlines/trains/taxi/metro=transporte, gas stations=gasolina. Default "otros".
-- raw_text: Full verbatim text of the receipt as you read it.
-- confidence: Object with score 0-1 per field indicating extraction confidence.
-
-Return ONLY a valid JSON object with these exact keys. No explanation, no markdown.`
 
 interface Props {
   companyId: string
@@ -89,38 +67,12 @@ export default function UploadModal({ companyId, userId, projects, defaultProjec
   const [saving, setSaving] = useState(false)
 
   const callClaudeVision = useCallback(async (url: string): Promise<AIExtracted> => {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': import.meta.env.VITE_ANTHROPIC_API_KEY as string,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'url', url } },
-            { type: 'text', text: RECEIPT_PROMPT },
-          ],
-        }],
-      }),
+    const { data, error } = await supabase.functions.invoke('analyze-receipt', {
+      body: { imageUrl: url },
     })
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({})) as { error?: { message?: string } }
-      throw new Error(err?.error?.message || `Claude API error ${response.status}`)
-    }
-
-    const data = await response.json() as { content: Array<{ type: string; text: string }> }
-    const raw = data.content[0]?.text || ''
-
-    // Clean possible markdown fences
-    const cleaned = raw.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim()
-    return JSON.parse(cleaned) as AIExtracted
+    if (error) throw new Error(error.message)
+    if (data?.error) throw new Error(data.error)
+    return data as AIExtracted
   }, [])
 
   const processFile = useCallback(async (file: File) => {
