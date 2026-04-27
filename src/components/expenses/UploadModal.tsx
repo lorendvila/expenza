@@ -98,7 +98,7 @@ export default function UploadModal({ companyId, userId, projects, defaultProjec
         'anthropic-dangerous-direct-browser-access': 'true',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1000,
         messages: [{
           role: 'user',
@@ -111,8 +111,8 @@ export default function UploadModal({ companyId, userId, projects, defaultProjec
     })
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}))
-      throw new Error((err as Record<string, unknown>)?.error?.toString() || `Claude API error ${response.status}`)
+      const err = await response.json().catch(() => ({})) as { error?: { message?: string } }
+      throw new Error(err?.error?.message || `Claude API error ${response.status}`)
     }
 
     const data = await response.json() as { content: Array<{ type: string; text: string }> }
