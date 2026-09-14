@@ -39,6 +39,37 @@ function FieldWrapper({ label, confidence, children }: { label: string; confiden
   )
 }
 
+async function compressImage(file: File): Promise<File> {
+  const MAX_PX = 1600
+  const QUALITY = 0.78
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      let { width, height } = img
+      if (width > MAX_PX || height > MAX_PX) {
+        if (width >= height) { height = Math.round((height * MAX_PX) / width); width = MAX_PX }
+        else { width = Math.round((width * MAX_PX) / height); height = MAX_PX }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      canvas.getContext('2d')!.drawImage(img, 0, 0, width, height)
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) { reject(new Error('Canvas toBlob failed')); return }
+          resolve(new File([blob], file.name, { type: 'image/jpeg' }))
+        },
+        'image/jpeg',
+        QUALITY
+      )
+    }
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Image load failed')) }
+    img.src = objectUrl
+  })
+}
+
 export default function UploadModal({ companyId, userId, projects, defaultProjectId, onClose, onSaved }: Props) {
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -79,12 +110,22 @@ export default function UploadModal({ companyId, userId, projects, defaultProjec
     setUploadStatus('uploading')
     setStatusMsg('Subiendo archivo...')
 
-    const ext = file.name.split('.').pop() || 'jpg'
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    let fileToUpload = file
+    let ext = file.name.split('.').pop() || 'jpg'
+    let contentType = file.type
+
+    if (!isPdf) {
+      fileToUpload = await compressImage(file)
+      ext = 'jpg'
+      contentType = 'image/jpeg'
+    }
+
     const filename = `${userId}/${Date.now()}.${ext}`
 
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('receipts')
-      .upload(filename, file, { contentType: file.type, upsert: false })
+      .upload(filename, fileToUpload, { contentType, upsert: false })
 
     if (uploadError || !uploadData) {
       setUploadStatus('error')
